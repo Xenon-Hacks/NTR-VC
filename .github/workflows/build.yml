@@ -1,0 +1,38 @@
+name: Build NTRViewer-HR (frame sharing, lite)
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: minimal
+          update: true
+          install: |
+            zip
+            unzip
+            make
+            mingw-w64-x86_64-sdl3
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-nasm
+      - uses: actions/checkout@v5
+        with:
+          path: repo
+      - name: Unpack and build
+        run: |
+          unzip -q repo/ntrviewer-hr-frame-share.zip
+          cd ntrviewer-hr-full-width
+          mkdir -p lib
+          make -j$(nproc) LITE=1
+          cd ..
+          cp ntrviewer-hr-full-width/ntrviewer.exe .
+          zip NTRViewer-HR-FrameShare-Lite-Win-x64.zip ntrviewer.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NTRViewer-HR-FrameShare-Lite-Win-x64
+          path: NTRViewer-HR-FrameShare-Lite-Win-x64.zip
