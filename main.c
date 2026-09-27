@@ -4,6 +4,7 @@
 #include "ui_common_sdl.h"
 #include "ui_renderer_sdl.h"
 #include "ntr_common.h"
+#include "frame_share.h"
 #ifndef USE_SDL_RENDERER_ONLY
 #include "ui_renderer_d3d11.h"
 #include "ui_renderer_ogl.h"
@@ -800,6 +801,7 @@ static void main_ntr(void) {
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED | ES_DISPLAY_REQUIRED);
 #endif
 
+    frame_share_init();   /* frame_share: lets other programs read the top screen */
     rp_buffer_init();
     rp_lock_init(ui_nk_lock);
 
@@ -919,6 +921,7 @@ join_udp_recv:
 
     rp_lock_close(sdl_cursors_lock);
     rp_buffer_destroy();
+    frame_share_close();
 
 #ifdef _WIN32
     SetThreadExecutionState(ES_CONTINUOUS);

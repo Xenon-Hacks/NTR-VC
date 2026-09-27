@@ -6,6 +6,7 @@
 #include "ui_input_redirection.h"
 #include "main.h"
 #include "ntr_common.h"
+#include "frame_share.h"
 #include "ntr_audio.h"
 #include "ikcp.h"
 #include <math.h>
@@ -366,6 +367,7 @@ void ui_windows_titles_update(void)
 
         bool has_traffic = kcp_active ? kcp_had_input : (frame_fully_received + frame_lost) > 0;
         double traffic_health = kcp_active ? kcp_quality : packet_rate;
+        frame_share_set_quality(traffic_health);   /* frame_share: for other programs */
 
         if (view_mode == VIEW_MODE_TOP_BOT)
         {

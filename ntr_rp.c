@@ -2,6 +2,7 @@
 #include "const.h"
 #include "main.h"
 #include "ntr_common.h"
+#include "frame_share.h"
 #include "ntr_huff.h"
 #include "ntr_jpeg_delta.h"
 #include "ntr_stats_overlay.h"
@@ -1579,6 +1580,14 @@ static void handle_decode_frame_screen(struct rp_buffer_ctx_t *ctx, int top_bot,
     }
 
     rp_lock_wait(ctx->status_lock);
+    if (top_bot == SCREEN_TOP) {
+        /* frame_share: publish the finished frame for other programs */
+        struct rp_dims *fs_dims = &ctx->dims_decoded[ctx->index_decode];
+        frame_share_publish(ctx->screen_decoded[ctx->index_decode],
+                            fs_dims->width ? fs_dims->width : SCREEN_WIDTH,
+                            fs_dims->height ? fs_dims->height : SCREEN_HEIGHT0,
+                            fs_dims->is_wide);
+    }
     // ctx_sync is set when view mode is top and bot in one window.
     // we can use this check to enable "triple buffering" only when the update rate is likely to exceed monitor refresh rate.
     if (/* ctx_sync && */ ctx->status >= FBS_UPDATED) {
