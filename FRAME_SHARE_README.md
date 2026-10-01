@@ -54,3 +54,21 @@ Shared memory `Local\NTRViewerHR_TopScreen` (Windows) or
 `/ntrviewer_hr_top_screen` (Linux): a 64-byte header then the pixels. The
 exact layout, and how to read it without catching a half-written frame, is
 at the top of `frame_share.h`.
+
+## Diagnostic log (added for long-run hang hunting)
+
+Every run now writes `ntrviewer_log_<date>_<time>.txt` in the folder you
+start `ntrviewer.exe` from (all of the viewer's normal error messages go
+there too, with a time-since-start stamp). Set the environment variable
+`NTRVIEWER_NO_LOG=1` to turn it off.
+
+- `HB` lines every 10 s: total/new UDP packets, decoded top/bottom frames,
+  render iterations, `shared_idx` (frames published to shared memory),
+  how many ms ago each stage last ran (`age_ms`), which stage each thread is
+  in right now, and process memory / handle / GDI / USER / thread counts.
+  A leak shows up as one of those numbers climbing for hours.
+- `STALL` / `RECOVER` lines when no packets arrive, packets arrive but nothing
+  decodes, or the render loop stops for more than 10 s. A STALL of the decoder
+  or renderer also writes `ntrviewer_stall_*.dmp` (a Windows minidump).
+- A crash writes `ntrviewer_crash_*.dmp`.
+- Logs rotate at 64 MB (4 files max).

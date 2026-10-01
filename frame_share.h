@@ -35,5 +35,6 @@ void frame_share_init(void);
 void frame_share_close(void);
 void frame_share_publish(const uint8_t *bgra, int width, int height, int is_wide);
 void frame_share_set_quality(double percent);
+uint32_t frame_share_get_index(void);   /* frames published so far (for diagnostics) */
 
 #endif

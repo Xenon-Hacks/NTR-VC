@@ -5,6 +5,7 @@
 #include "ui_renderer_sdl.h"
 #include "ntr_common.h"
 #include "frame_share.h"
+#include "diag.h"
 #ifndef USE_SDL_RENDERER_ONLY
 #include "ui_renderer_d3d11.h"
 #include "ui_renderer_ogl.h"
@@ -472,6 +473,10 @@ static bool decode_cond_wait(event_t *event)
 }
 
 static void thread_loop(int i) {
+    if (i == SCREEN_TOP) {
+        DIAG_TICK(DIAG_T_RENDER);
+        DIAG_STAGE(diag_stage_ren, DIAG_REN_WAIT_FRAME);
+    }
     // TODO csc
     int ctx_top_bot = i;
     int screen_top_bot = i;
@@ -512,10 +517,13 @@ static void thread_loop(int i) {
     float bg[GL_CHANNELS_N];
     nk_color_fv(bg, nk_window_bgcolor);
 
-    if (!renderer_single_thread && renderer_evt_sync)
+    if (!renderer_single_thread && renderer_evt_sync) {
+        if (i == SCREEN_TOP) DIAG_STAGE(diag_stage_ren, DIAG_REN_SYNC_WAIT);
         if (!cond_mutex_flag_lock(&renderer_begin_evt))
             return;
+    }
 
+    if (i == SCREEN_TOP) DIAG_STAGE(diag_stage_ren, DIAG_REN_DRAW);
     if (is_renderer_d3d11()) {
 #ifndef USE_SDL_RENDERER_ONLY
         ui_renderer_d3d11_main(screen_top_bot, ctx_top_bot, view_mode, win_shared, bg);
@@ -569,11 +577,13 @@ static void thread_loop(int i) {
                 nk_input_end(ui_nk_ctx);
             }
 
+            if (i == SCREEN_TOP) DIAG_STAGE(diag_stage_ren, DIAG_REN_UI);
             ui_main_nk();
             nk_gui_next = 1;
         }
     }
 
+    if (i == SCREEN_TOP) DIAG_STAGE(diag_stage_ren, DIAG_REN_PRESENT);
     if (is_renderer_d3d11()) {
 #ifndef USE_SDL_RENDERER_ONLY
         ui_renderer_d3d11_present(screen_top_bot, ctx_top_bot, win_shared);
@@ -592,6 +602,11 @@ static void thread_loop(int i) {
 
     if (!renderer_single_thread && renderer_evt_sync)
         cond_mutex_flag_signal(&renderer_end_evt);
+
+    if (i == SCREEN_TOP) {
+        DIAG_STAGE(diag_stage_ren, DIAG_REN_IDLE);
+        DIAG_TICK(DIAG_T_RENDER);
+    }
 }
 
 static thread_ret_t window_thread_func(void *arg) {
@@ -616,6 +631,7 @@ static thread_ret_t window_thread_func(void *arg) {
 static void main_loop(void) {
     // TODO csc
 
+    DIAG_TICK(DIAG_T_MAIN);
     int64_t begin_time = iclock64();
     SDL_Event evt;
     while (!renderer_single_thread && !renderer_evt_sync ? SDL_WaitEventTimeout(&evt, REST_EVERY_MS) : SDL_PollEvent(&evt))
@@ -922,6 +938,7 @@ join_udp_recv:
     rp_lock_close(sdl_cursors_lock);
     rp_buffer_destroy();
     frame_share_close();
+    diag_close();
 
 #ifdef _WIN32
     SetThreadExecutionState(ES_CONTINUOUS);
@@ -1005,6 +1022,7 @@ static void main_windows(void) {
 }
 
 int main(int argc, char **argv) {
+    diag_init();          /* diagnostics: log file, heartbeat, stall watchdog */
     main_init();
 
     parse_args(argc, argv);

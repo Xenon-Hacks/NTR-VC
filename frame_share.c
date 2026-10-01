@@ -149,3 +149,8 @@ void frame_share_set_quality(double percent)
     __atomic_store_n(&fs_hdr->quality_x10, q, __ATOMIC_RELAXED);
     __atomic_store_n(&fs_hdr->quality_time_ms, fs_now_ms(), __ATOMIC_RELEASE);
 }
+
+uint32_t frame_share_get_index(void)
+{
+    return fs_hdr ? __atomic_load_n(&fs_hdr->frame_index, __ATOMIC_RELAXED) : 0;
+}

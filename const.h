@@ -11,7 +11,14 @@
 #endif
 
 #include <stdio.h>
-#define err_log(f, ...) fprintf(stderr, "%s:%d:%s " f, __FILE__, __LINE__, __func__, ## __VA_ARGS__)
+#ifdef __cplusplus
+extern "C" {
+#endif
+const char *diag_ts(void);   /* diag.c: time since start, for log lines */
+#ifdef __cplusplus
+}
+#endif
+#define err_log(f, ...) fprintf(stderr, "[%s] %s:%d:%s " f, diag_ts(), __FILE__, __LINE__, __func__, ## __VA_ARGS__)
 
 #ifdef _WIN32
 #include <winsock2.h>

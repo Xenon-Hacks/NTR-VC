@@ -3,6 +3,7 @@
 #include "main.h"
 #include "ntr_common.h"
 #include "frame_share.h"
+#include "diag.h"
 #include "ntr_huff.h"
 #include "ntr_jpeg_delta.h"
 #include "ntr_stats_overlay.h"
@@ -1567,6 +1568,7 @@ static int handle_decode_kcp(uint8_t *out, int w, int queue_w)
 static void handle_decode_frame_screen(struct rp_buffer_ctx_t *ctx, int top_bot, int frame_size, int delay_between_packet, struct rp_buffer_ctx_t *sync_ctx)
 {
     __atomic_add_fetch(&frame_rate_decoded_tracker[top_bot], 1, __ATOMIC_RELAXED);
+    DIAG_TICK(top_bot == SCREEN_TOP ? DIAG_T_DEC_TOP : DIAG_T_DEC_BOT);
 
     {
         int frame_size_track = __atomic_load_n(&frame_size_tracker[top_bot], __ATOMIC_RELAXED);
@@ -1579,7 +1581,9 @@ static void handle_decode_frame_screen(struct rp_buffer_ctx_t *ctx, int top_bot,
             ;
     }
 
+    DIAG_STAGE(diag_stage_dec, DIAG_DEC_PUBLISH_LOCK);
     rp_lock_wait(ctx->status_lock);
+    DIAG_STAGE(diag_stage_dec, DIAG_DEC_PUBLISH);
     if (top_bot == SCREEN_TOP) {
         /* frame_share: publish the finished frame for other programs */
         struct rp_dims *fs_dims = &ctx->dims_decoded[ctx->index_decode];
@@ -1603,6 +1607,7 @@ static void handle_decode_frame_screen(struct rp_buffer_ctx_t *ctx, int top_bot,
         ctx->status = FBS_UPDATED;
     }
     rp_lock_rel(ctx->status_lock);
+    DIAG_STAGE(diag_stage_dec, DIAG_DEC_IDLE);
 
     if (renderer_single_thread) {
         cond_mutex_flag_signal(&decode_updated_event);
@@ -1665,6 +1670,7 @@ static thread_ret_t jpeg_decode_thread_func(void *e)
 
         int top_bot = ptr->top_bot;
         struct rp_buffer_ctx_t *ctx = &rp_buffer_ctx[top_bot];
+        DIAG_STAGE(diag_stage_dec, DIAG_DEC_DECODE);
         rp_lock_wait(ctx->status_lock);
         int index = ctx->index_decode;
         int index_prev = ctx->index_decode_prev;
@@ -2470,6 +2476,7 @@ static void receive_from_socket()
     while (program_running && !kcp_restart) {
         socklen_t addr_len = sizeof(remote_addr);
 
+        DIAG_STAGE(diag_stage_udp, DIAG_UDP_RECVFROM);
         int ret = recvfrom(s, (char *)buf, sizeof(buf), 0, (struct sockaddr *)&remote_addr, &addr_len);
         if (
             ret == 0
@@ -2496,7 +2503,9 @@ static void receive_from_socket()
             } else if (err == WSAEWOULDBLOCK) {
                 // keep replying during inbound silence, paced under socket_reply's limits
                 while (program_running && !kcp_restart) {
+                    DIAG_STAGE(diag_stage_udp, DIAG_UDP_REPLY);
                     socket_reply();
+                    DIAG_STAGE(diag_stage_udp, DIAG_UDP_POLL);
                     if (kcp_restart)
                         break;
                     int poll_ms = SOCKET_POLL_INTERVAL_MS;
@@ -2526,7 +2535,9 @@ static void receive_from_socket()
         }
 
         remote_received = 1;
+        DIAG_TICK(DIAG_T_PKT);
 
+        DIAG_STAGE(diag_stage_udp, DIAG_UDP_ACTION);
         socket_action(ret);
     }
 }
