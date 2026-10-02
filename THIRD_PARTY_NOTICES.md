@@ -31,4 +31,4 @@ Not every component is compiled into the "lite" Windows build; all are listed be
 | MinGW-w64 runtime and winpthreads | ZPL / MIT-style |
 | GCC runtime (libgcc, libstdc++) | GPL-3.0 with GCC Runtime Library Exception (no obligations for this use) |
 
-The release workflow copies the MSYS2 license files for these packages into the release zip's `licenses/` folder. Because this application's full source is provided, the LGPL relinking requirement for libiconv can be met by rebuilding from source with a modified libiconv.
+The release workflow copies the MSYS2 license files for these packages into the release zip's `licenses/` folder. Every release also attaches the complete application source (`ntrviewer-hr-frame-share.zip`), so the viewer can be rebuilt against a modified libiconv as the LGPL requires.

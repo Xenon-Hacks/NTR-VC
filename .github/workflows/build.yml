@@ -38,7 +38,27 @@ jobs:
           make -j$(nproc) LITE=1
           cd ..
           cp ntrviewer-hr-full-width/ntrviewer.exe .
-          zip NTRViewer-HR-FrameShare-Lite-Win-x64.zip ntrviewer.exe
+          mkdir -p pkg/licenses
+          cp ntrviewer.exe repo/LICENSE repo/THIRD_PARTY_NOTICES.md pkg/
+          cp repo/licenses/* pkg/licenses/
+          src=ntrviewer-hr-full-width
+          cp $src/LICENSE pkg/licenses/ntrviewer-hr-LICENSE
+          cp $src/LICENSE-kcp pkg/licenses/kcp-LICENSE
+          cp $src/nuklear/LICENSE-original pkg/licenses/nuklear-LICENSE
+          cp $src/fecal/LICENSE-original.md pkg/licenses/fecal-LICENSE.md
+          cp $src/jpeg_turbo/LICENSE.md pkg/licenses/libjpeg-turbo-LICENSE.md
+          cp $src/clarity/LICENSE.md pkg/licenses/clarity-LICENSE.md
+          cp $src/rapidjson/license.txt pkg/licenses/rapidjson-LICENSE.txt
+          cp $src/models-se/LICENSE pkg/licenses/realcugan-models-LICENSE
+          sed -n '/available under 2 licenses/,$p' $src/stb_image.h > pkg/licenses/stb_image-LICENSE.txt
+          # Licenses of the MSYS2 libraries linked into the exe
+          for p in sdl3 libiconv winpthreads mingw-w64-crt headers-git; do
+            for d in /mingw64/share/licenses/*; do
+              case "$(basename "$d" | tr A-Z a-z)" in *"$p"*) cp -r "$d" "pkg/licenses/msys2-$(basename "$d")";; esac
+            done
+          done
+          ls -R pkg
+          (cd pkg && zip -r ../NTRViewer-HR-FrameShare-Lite-Win-x64.zip .)
       - uses: actions/upload-artifact@v4
         with:
           name: NTRViewer-HR-FrameShare-Lite-Win-x64
@@ -50,6 +70,10 @@ jobs:
           tag_name: ${{ inputs.release_tag }}
           name: NTR-VC v${{ inputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          files: NTRViewer-HR-FrameShare-Lite-Win-x64.zip
+          files: |
+            NTRViewer-HR-FrameShare-Lite-Win-x64.zip
+            repo/ntrviewer-hr-frame-share.zip
           body: |
+            Based on NTRViewer-HR by xzn (https://github.com/xzn/ntrviewer-hr), MIT License. License files are inside the zip; full source is ntrviewer-hr-frame-share.zip.
+
             Diagnostic build. Writes ntrviewer_log_<date>_<time>.txt next to the exe with heartbeat (HB) lines and a stall watchdog, to help track down long-run freezes. See the "Diagnostic log" section of FRAME_SHARE_README.md in the source zip.
