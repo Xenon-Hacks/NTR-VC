@@ -1,6 +1,13 @@
 name: Build NTRViewer-HR (frame sharing, lite)
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag to publish as a GitHub release (leave empty to only build)"
+        required: false
+        default: ""
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -36,3 +43,13 @@ jobs:
         with:
           name: NTRViewer-HR-FrameShare-Lite-Win-x64
           path: NTRViewer-HR-FrameShare-Lite-Win-x64.zip
+      - name: Publish release
+        if: ${{ inputs.release_tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: NTR-VC v${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          files: NTRViewer-HR-FrameShare-Lite-Win-x64.zip
+          body: |
+            Diagnostic build. Writes ntrviewer_log_<date>_<time>.txt next to the exe with heartbeat (HB) lines and a stall watchdog, to help track down long-run freezes. See the "Diagnostic log" section of FRAME_SHARE_README.md in the source zip.
