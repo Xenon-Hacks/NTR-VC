@@ -96,6 +96,11 @@ Changes in this build:
   instead of waiting for UDP packets that a reset 3DS won't send. Pressing
   Disconnect stops this. Uses the existing "Auto reconnect" setting.
 - Auto-reconnect no longer misses a still-streaming 3DS after a TCP drop.
+- When a reconnect attempt times out, the viewer pings the 3DS once and logs
+  whether it answers ("3DS answers ping ... NTR isn't answering on port
+  8000" or "3DS doesn't answer ping: it's off the network"), only when that
+  changes, and "reconnected to the 3DS" once the link is back. That tells a
+  3DS that fell off Wi-Fi apart from one whose NTR stopped answering.
 - Windows: an auto-reset event `Local\NTRViewerHR_TopScreenFrame` is set
   after every published frame, so a reader can wait instead of polling.
 

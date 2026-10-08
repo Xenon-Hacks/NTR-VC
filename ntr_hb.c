@@ -105,6 +105,34 @@ static SOCKET tcp_connect(int port, uint32_t addr)
     return INVALID_SOCKET;
 }
 
+#ifdef _WIN32
+#include <iphlpapi.h>
+#include <icmpapi.h>
+
+// Round-trip time in ms if the 3DS answers one ping within a second, else -1.
+// A reconnect that times out can mean the 3DS dropped off Wi-Fi (no ping) or
+// that it's still on Wi-Fi but NTR has stopped answering on port 8000 (ping
+// OK); logging which one turns the next drop's log into an answer.
+static int ping_3ds_ms(uint32_t addr)
+{
+    HANDLE icmp = IcmpCreateFile();
+    if (icmp == INVALID_HANDLE_VALUE)
+        return -1;
+    char data[] = "ntr-vc";
+    char reply[sizeof(ICMP_ECHO_REPLY) + sizeof(data) + 8 + 32];
+    // same byte order as sin_addr.s_addr in tcp_connect
+    DWORD n = IcmpSendEcho(icmp, (IPAddr)htonl(__builtin_bswap32(addr)), data, sizeof(data), NULL, reply, sizeof(reply), 1000);
+    int ret = -1;
+    if (n > 0) {
+        PICMP_ECHO_REPLY r = (PICMP_ECHO_REPLY)reply;
+        if (r->Status == IP_SUCCESS)
+            ret = (int)r->RoundTripTime;
+    }
+    IcmpCloseHandle(icmp);
+    return ret;
+}
+#endif
+
 static int tcp_send(SOCKET sockfd, char *buf, int size)
 {
     int ret, pos = 0;
@@ -233,6 +261,7 @@ thread_ret_t tcp_thread_func(void *arg)
     bool retry_pending = false;
     int retry_delay_ms = 0;
     uint32_t retry_at_us = 0;
+    int ping_state = 0;            // 1 answers ping, -1 doesn't, 0 not checked yet
     while (program_running)
     {
         uint32_t ip_octet_incoming;
@@ -268,6 +297,18 @@ thread_ret_t tcp_thread_func(void *arg)
                     *(t->remote_play) = 0;
                 }
                 if (retry_pending) {
+#ifdef _WIN32
+                    // logged once per change, not on every attempt
+                    int ms = ping_3ds_ms(ip_octet);
+                    int state = ms >= 0 ? 1 : -1;
+                    if (state != ping_state) {
+                        if (state > 0)
+                            err_log("3DS answers ping (%d ms): it's on Wi-Fi, but NTR isn't answering on port %d\n", ms, t->port);
+                        else
+                            err_log("3DS doesn't answer ping: it's off the network (Wi-Fi dropped, asleep or crashed)\n");
+                        ping_state = state;
+                    }
+#endif
                     retry_delay_ms = MIN(retry_delay_ms * 2, RECONNECT_MAX_MS);
                     retry_at_us = iclock() + (uint32_t)retry_delay_ms * 1000;
                 }
@@ -278,6 +319,9 @@ thread_ret_t tcp_thread_func(void *arg)
                 // ask for the stream again; same params are a no-op if it's still running
                 *(t->remote_play) = 1;
             }
+            if (ping_state)
+                err_log("reconnected to the 3DS\n");
+            ping_state = 0;
             retry_pending = false;
             packet_seq = 0;
             *(t->work_state) = CONNECTION_STATE_CONNECTED;
