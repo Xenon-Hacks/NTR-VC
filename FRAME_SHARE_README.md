@@ -116,3 +116,16 @@ Small gaps are filled with silence, as for playback. Layout and how to read
 it safely are at the top of `audio_share.h`. Files: `audio_share.c` /
 `audio_share.h`, hooked in `ntr_audio.c` and `main.c` (not in
 `frame_share.patch`).
+
+## Saved settings
+
+The viewer remembers its settings between launches in `ntrviewer_settings.ini`, next to the exe (`settings.c`).
+
+- **What's saved:** everything in the Remote Play window (view mode, upscaling filter, 3DS IP, viewer port, Prioritize Top Screen, Priority Screen Factor, compression format, JPEG quality or colour bias, Auto Quality, bandwidth limit, input redirection face-button swap, bottom-screen cursor size, ambience quality and blur), the Debug-window toggles (Stats, Audio (NTR-HR+), Full Width, Auto-Reconnect, Auto-Update Params), and the size and position of the top window (and the bottom one in Separate Windows mode).
+- **When:** about a second after something changes, and again on exit. The file is written to a `.tmp` and then renamed, so a crash can't leave half a file. A missing file is created on the first launch with the defaults.
+- **Bad or missing values** fall back to the built-in default for just that setting; delete the file to reset everything. A window saved on a monitor that's no longer connected keeps its size but not its position.
+- **3DS IP:** if Auto-Detect finds a 3DS at launch, the detected address wins (the saved one is picked when it's among those found). The saved IP is used when nothing is detected.
+- **Auto-Reconnect:** only the Debug-window checkbox is remembered. Clicking Disconnect turns Auto-Reconnect off for that session only, so the next launch still reconnects.
+- Not saved: the Viewer IP adapter, the input-redirection controller, and fullscreen.
+
+Hooks: `settings_load()` and `settings_apply_windows()` in `main_windows()` (`ntr_config_set_default()` moved there from `main_ntr()` so the saved values aren't overwritten), `settings_apply_ip()` after `ntr_detect_3ds_ip()`, `settings_tick()` in `main_loop()`, `settings_save()` after the main loop, and `settings_auto_*` updates around the two Debug-window checkboxes in `ui_main_nk.c`.

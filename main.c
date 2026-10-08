@@ -7,6 +7,7 @@
 #include "frame_share.h"
 #include "audio_share.h"
 #include "diag.h"
+#include "settings.h"
 #ifndef USE_SDL_RENDERER_ONLY
 #include "ui_renderer_d3d11.h"
 #include "ui_renderer_ogl.h"
@@ -804,6 +805,8 @@ skip_evt:
     update_game_controller();
     update_bottom_screen_cursor();
 
+    settings_tick();
+
     view_mode_t view_mode = __atomic_load_n(&ui_view_mode, __ATOMIC_RELAXED);
     if (ui_view_mode_prev != view_mode) {
         ui_view_mode_update(view_mode);
@@ -855,8 +858,8 @@ static void main_ntr(void) {
     rp_buffer_init();
     rp_lock_init(ui_nk_lock);
 
-    ntr_config_set_default();
     ntr_detect_3ds_ip();
+    settings_apply_ip();      /* settings: the 3DS IP saved last time */
     ntr_get_adapter_list();
     ntr_try_auto_select_adapter();
     ui_update_game_controllers();
@@ -940,6 +943,7 @@ static void main_ntr(void) {
 
     while (program_running)
         main_loop();
+    settings_save();          /* settings: write anything changed in the last second */
 
 join_timer:
     SDL_RemoveTimer(timer_id);
@@ -1016,10 +1020,15 @@ static void main_windows(void) {
 
     event_init(&update_bottom_screen_evt);
 
+    ntr_config_set_default();
+    settings_load();          /* settings: what the user picked last time */
+
     for (int i = 0; i < SCREEN_COUNT; ++i) {
         ui_window_size_update(i);
     }
     ui_view_mode_update(ui_view_mode);
+    ui_view_mode_prev = ui_view_mode;
+    settings_apply_windows();
     SDL_ShowWindow(ui_sdl_win[SCREEN_TOP]);
 
     nk_backend_font_init();
