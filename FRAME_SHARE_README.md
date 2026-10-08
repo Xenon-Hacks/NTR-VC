@@ -98,3 +98,16 @@ Changes in this build:
 - Auto-reconnect no longer misses a still-streaming 3DS after a TCP drop.
 - Windows: an auto-reset event `Local\NTRViewerHR_TopScreenFrame` is set
   after every published frame, so a reader can wait instead of polling.
+
+## Audio sharing
+
+The game audio NTR-HR sends (NTR-HR+ audio, turned on in the viewer's
+Debug window) is also published to shared memory, `Local\NTRViewerHR_Audio`
+on Windows or `/ntrviewer_hr_audio` on Linux: a ring of the last ~8 s of
+16-bit stereo samples at 32728 Hz. It is copied as each audio packet
+arrives, before playback, so the PC's volume, mute and output device make
+no difference to it, and it keeps working with no audio device at all.
+Small gaps are filled with silence, as for playback. Layout and how to read
+it safely are at the top of `audio_share.h`. Files: `audio_share.c` /
+`audio_share.h`, hooked in `ntr_audio.c` and `main.c` (not in
+`frame_share.patch`).

@@ -5,6 +5,7 @@
 #include "ui_renderer_sdl.h"
 #include "ntr_common.h"
 #include "frame_share.h"
+#include "audio_share.h"
 #include "diag.h"
 #ifndef USE_SDL_RENDERER_ONLY
 #include "ui_renderer_d3d11.h"
@@ -850,6 +851,7 @@ static void main_ntr(void) {
 #endif
 
     frame_share_init();   /* frame_share: lets other programs read the top screen */
+    audio_share_init();   /* audio_share: ... and hear the game audio */
     rp_buffer_init();
     rp_lock_init(ui_nk_lock);
 
@@ -970,6 +972,7 @@ join_udp_recv:
     rp_lock_close(sdl_cursors_lock);
     rp_buffer_destroy();
     frame_share_close();
+    audio_share_close();
     diag_close();
 
 #ifdef _WIN32

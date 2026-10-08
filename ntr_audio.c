@@ -1,5 +1,6 @@
 #include "const.h"
 #include "ntr_audio.h"
+#include "audio_share.h"
 
 // sdl device stream, opened lazily on the first audio frame
 static SDL_AudioStream *audio_stream;
@@ -42,6 +43,9 @@ static bool ntr_audio_open(void)
 
 static void ntr_audio_put(const uint8_t *frame)
 {
+    audio_share_write(frame, RP_AUDIO_FRAME_SAMPLES); /* audio_share: for other programs */
+    if (!audio_stream)
+        return; // no playback device, the shared copy still gets the audio
     // latency hit the cap: flush and re-prime instead of holding max lag forever
     bool max_lat = SDL_GetAudioStreamQueued(audio_stream) > RP_AUDIO_FRAME_BYTES * AUDIO_MAX_QUEUED_FRAMES;
     bool no_data = SDL_GetAudioStreamAvailable(audio_stream) <= 0;
@@ -72,8 +76,7 @@ void ntr_audio_handle_packet(const uint8_t *pcm, int size, uint8_t fmt, uint8_t 
     if (nframes < 1)
         return; // no whole frame
 
-    if (!ntr_audio_open())
-        return;
+    ntr_audio_open(); // a missing playback device still leaves audio_share
 
     static const uint8_t silence[RP_AUDIO_FRAME_BYTES] = {0};
 
@@ -119,7 +122,7 @@ void ntr_audio_handle_packet(const uint8_t *pcm, int size, uint8_t fmt, uint8_t 
     }
 
     // start playback only once primed
-    if (!audio_primed &&
+    if (audio_stream && !audio_primed &&
         SDL_GetAudioStreamQueued(audio_stream) >= RP_AUDIO_FRAME_BYTES * audio_prime_frames) {
         if (!SDL_ResumeAudioStreamDevice(audio_stream))
             err_log("SDL_ResumeAudioStreamDevice: %s\n", SDL_GetError());
@@ -134,6 +137,7 @@ void ntr_audio_reset(void)
     audio_last_seq = 0;
     audio_primed = false;
     audio_prime_frames = AUDIO_PRIME_FRAMES_MIN;
+    audio_share_new_stream();
     if (audio_stream) {
         SDL_ClearAudioStream(audio_stream);
         SDL_PauseAudioStreamDevice(audio_stream);
