@@ -25,6 +25,11 @@
  *
  * Readers: read seq (must be even), copy, read seq again; if it changed,
  * retry.
+ *
+ * Windows also has an auto-reset event "Local\NTRViewerHR_TopScreenFrame",
+ * set after every published frame. One reader can wait on it (with a
+ * timeout) instead of polling; it wakes one waiter per frame, so a second
+ * reader should keep polling frame_index.
  */
 #ifndef FRAME_SHARE_H
 #define FRAME_SHARE_H

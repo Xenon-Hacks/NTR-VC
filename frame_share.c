@@ -33,6 +33,7 @@ static uint8_t *fs_pixels;
 #ifdef _WIN32
 #include <windows.h>
 static HANDLE fs_mapping;
+static HANDLE fs_frame_event;   /* set after every published frame */
 
 static uint64_t fs_now_ms(void) { return (uint64_t)GetTickCount64(); }
 
@@ -46,8 +47,17 @@ static void *fs_map(void)
     if (!p) {
         CloseHandle(fs_mapping);
         fs_mapping = NULL;
+        return NULL;
     }
+    /* auto-reset, so a reader can block on it instead of polling seq */
+    fs_frame_event = CreateEventW(NULL, FALSE, FALSE, L"Local\\NTRViewerHR_TopScreenFrame");
     return p;
+}
+
+static void fs_signal(void)
+{
+    if (fs_frame_event)
+        SetEvent(fs_frame_event);
 }
 
 static void fs_unmap(void *p)
@@ -57,6 +67,9 @@ static void fs_unmap(void *p)
     if (fs_mapping)
         CloseHandle(fs_mapping);
     fs_mapping = NULL;
+    if (fs_frame_event)
+        CloseHandle(fs_frame_event);
+    fs_frame_event = NULL;
 }
 #else
 #include <fcntl.h>
@@ -85,6 +98,8 @@ static void *fs_map(void)
     close(fd);
     return p == MAP_FAILED ? NULL : p;
 }
+
+static void fs_signal(void) {}
 
 static void fs_unmap(void *p)
 {
@@ -139,6 +154,7 @@ void frame_share_publish(const uint8_t *bgra, int width, int height, int is_wide
     fs_hdr->frame_index += 1;
     fs_hdr->frame_time_ms = fs_now_ms();
     __atomic_store_n(&fs_hdr->seq, seq + 2, __ATOMIC_RELEASE);    /* even: complete */
+    fs_signal();
 }
 
 void frame_share_set_quality(double percent)

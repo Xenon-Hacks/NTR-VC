@@ -105,6 +105,19 @@ static struct kcp_recv_info_t {
     u16 last_term_size; // size saved so far
 } kcp_recv_info[RP_KCP_WORK_COUNT][RP_WORK_COUNT];
 
+// Return a frame slot to all-zero. Only rows [0, count) were written for
+// this frame, so clear just those (tens of KB) instead of the whole 2 MB slot.
+static void kcp_recv_clear(struct kcp_recv_t *recvs)
+{
+    for (int t = 0; t < RP_CORE_COUNT_MAX; ++t) {
+        struct kcp_recv_t *recv = &recvs[t];
+        int count = recv->count < RP_MAX_PACKET_COUNT ? recv->count : RP_MAX_PACKET_COUNT;
+        memset(recv->buf, 0, (size_t)count * RP_KCP_PACKET_SIZE);
+        recv->count = 0;
+        recv->term_size = 0;
+    }
+}
+
 static void kcp_init(ikcpcb *kcp)
 {
     kcp->output = kcp_udp_output;
@@ -272,19 +285,28 @@ static uint8_t last_decoded_frame_id[SCREEN_COUNT];
 #include <turbojpeg.h>
 #endif
 
+// Only the decode thread decodes, and decode threads never overlap (the old
+// one is joined before a new one starts), so one handle is reused for the
+// life of the process instead of allocating a decompressor every frame.
+static tjhandle decode_tj_instance;
+
 static int handle_decode(uint8_t *out, uint8_t *in, int size, int w, int h)
 {
-    tjhandle tjInstance = NULL;
-    if ((tjInstance = tj3Init(TJINIT_DECOMPRESS)) == NULL) {
-        err_log("create turbo jpeg decompressor failed\n");
-        return -1;
+    if (!decode_tj_instance) {
+        tjhandle tj = tj3Init(TJINIT_DECOMPRESS);
+        if (tj == NULL) {
+            err_log("create turbo jpeg decompressor failed\n");
+            return -1;
+        }
+        if (tj3Set(tj, TJPARAM_STOPONWARNING, 1) != 0) {
+            tj3Destroy(tj);
+            return -1;
+        }
+        decode_tj_instance = tj;
     }
+    tjhandle tjInstance = decode_tj_instance;
 
     int ret = -1;
-
-    if (tj3Set(tjInstance, TJPARAM_STOPONWARNING, 1) != 0) {
-        goto final;
-    }
 
     if (tj3DecompressHeader(tjInstance, in, size) != 0) {
         err_log("jpeg header error\n");
@@ -306,7 +328,6 @@ static int handle_decode(uint8_t *out, uint8_t *in, int size, int w, int h)
     ret = 0;
 
 final:
-    tj3Destroy(tjInstance);
     return ret;
 }
 
@@ -996,7 +1017,7 @@ static int handle_decode_delta_prog(uint8_t *out, struct kcp_recv_t *recvs, stru
     }
     // err_log("size %d\n", total_size);
 
-    memset(recvs, 0, sizeof(struct kcp_recv_t) * RP_CORE_COUNT_MAX);
+    kcp_recv_clear(recvs);
     memset(info, 0, sizeof(struct kcp_recv_info_t));
 
     return 0;
@@ -1470,7 +1491,7 @@ static int handle_decode_lossless_compressed(uint8_t *out, struct kcp_recv_t *re
         }
     }
 
-    memset(recvs, 0, sizeof(struct kcp_recv_t) * RP_CORE_COUNT_MAX);
+    kcp_recv_clear(recvs);
     memset(info, 0, sizeof(struct kcp_recv_info_t));
 
     return 0;
@@ -1559,7 +1580,7 @@ static int handle_decode_kcp(uint8_t *out, int w, int queue_w)
         return -3;
     }
 
-    memset(recvs, 0, sizeof(struct kcp_recv_t) * RP_CORE_COUNT_MAX);
+    kcp_recv_clear(recvs);
     memset(info, 0, sizeof(struct kcp_recv_info_t));
 
     return 0;
@@ -1642,6 +1663,10 @@ static void screen_process(uint8_t *curr, uint8_t *prev, uint8_t *out, bool even
 
 static thread_ret_t jpeg_decode_thread_func(void *e)
 {
+#ifdef _WIN32
+    // decode publishes frame_share too; keep it ahead of the bot and other apps
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+#endif
     reset_jpeg_delta();
     memset(lossless_delta_prev, 0, sizeof(lossless_delta_prev));
 
@@ -2525,8 +2550,12 @@ static void receive_from_socket()
         }
 
         // publish sender IP lock-free (the GUI holds ui_nk_lock for long spans)
+        // compare against the shared value too: the TCP thread clears it on
+        // disconnect, and auto-reconnect needs it set again while the 3DS
+        // keeps streaming from the same address
         uint32_t addr_octets = __builtin_bswap32(ntohl(remote_addr.sin_addr.s_addr));
-        if (addr_octets != last_published_addr) {
+        if (addr_octets != last_published_addr ||
+            __atomic_load_n((uint32_t *)ntr_ip_octet_incoming, __ATOMIC_RELAXED) != addr_octets) {
             last_published_addr = addr_octets;
             __atomic_store_n((uint32_t *)ntr_ip_octet_incoming, addr_octets, __ATOMIC_RELAXED);
             uint32_t expected = 0;
@@ -2639,6 +2668,11 @@ static void receive_from_socket_loop(void)
 
 thread_ret_t udp_recv_thread_func(void *)
 {
+#ifdef _WIN32
+    // mostly blocked in poll; when it wakes it must drain the socket and send
+    // KCP acks/nacks promptly or the 3DS stalls its send window
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+#endif
     while (program_running) {
         s = INVALID_SOCKET;
         int ret;

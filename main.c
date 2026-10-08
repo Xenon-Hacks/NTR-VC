@@ -65,8 +65,37 @@ void itimeofday(int64_t *sec, int64_t *usec)
 #endif
 }
 
+#ifdef _WIN32
+#include <mmsystem.h>
+
+// Keep full CPU speed and 1 ms timers while minimised. Windows 11 puts
+// minimised/occluded windows' processes on EcoQoS (efficiency cores, low
+// clocks) and ignores their timer-resolution requests, which slows receive,
+// KCP acks and decode exactly when the viewer runs in the background.
+static void main_disable_power_throttling(void) {
+    struct {
+        ULONG Version;
+        ULONG ControlMask;
+        ULONG StateMask;
+    } state = {
+        1, // PROCESS_POWER_THROTTLING_CURRENT_VERSION
+        0x1 | 0x4, // EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION
+        0, // opt out of both
+    };
+    typedef BOOL(WINAPI * set_process_information_t)(HANDLE, int, LPVOID, DWORD);
+    set_process_information_t set_process_information =
+        (set_process_information_t)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetProcessInformation");
+    if (!set_process_information ||
+        !set_process_information(GetCurrentProcess(), 4 /* ProcessPowerThrottling */, &state, sizeof(state))) {
+        err_log("power throttling opt-out unavailable\n");
+    }
+    timeBeginPeriod(1);
+}
+#endif
+
 static void main_init() {
 #ifdef _WIN32
+    main_disable_power_throttling();
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
     GetVersionEx(&osvi);
     err_log("Windows version %d.%d.%d\n", (int)osvi.dwMajorVersion, (int)osvi.dwMinorVersion, (int)osvi.dwBuildNumber);
@@ -81,6 +110,9 @@ static void main_init() {
 }
 
 static void main_destroy() {
+#ifdef _WIN32
+    timeEndPeriod(1);
+#endif
     RO_UNINIT();
 }
 

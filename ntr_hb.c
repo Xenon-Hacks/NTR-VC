@@ -6,6 +6,10 @@
 
 #define HEART_BEAT_EVERY_MS 250
 
+// auto-reconnect backoff after the control link drops mid-stream
+#define RECONNECT_FIRST_MS 1000
+#define RECONNECT_MAX_MS 15000
+
 #define TCP_MAGIC 0x12345678
 #define TCP_ARGS_COUNT 16
 
@@ -212,28 +216,50 @@ thread_ret_t tcp_thread_func(void *arg)
         __atomic_store_n((uint32_t *)ntr_ip_octet_incoming, 0, __ATOMIC_RELAXED); \
     } \
     err_log("disconnected\n"); \
+    if (t->remote_play && rp_sent && ntr_auto_reconnect) { \
+        /* the link dropped under a running stream: retry it ourselves, */ \
+        /* the 3DS may not stream again until it hears from us */ \
+        retry_pending = true; \
+        retry_delay_ms = RECONNECT_FIRST_MS; \
+        retry_at_us = iclock() + RECONNECT_FIRST_MS * 1000; \
+    } \
+    rp_sent = false; \
 } while (0)
 
     SOCKET sockfd = INVALID_SOCKET;
     int packet_seq = 0;
+    bool rp_sent = false;          // remote play requested on this connection
+    bool auto_connect_ok = true;   // false after the user disconnects
+    bool retry_pending = false;
+    int retry_delay_ms = 0;
+    uint32_t retry_at_us = 0;
     while (program_running)
     {
         uint32_t ip_octet_incoming;
         uint32_t ip_octet;
 
-        ip_octet_incoming = t->remote_play && ntr_auto_reconnect
+        ip_octet_incoming = t->remote_play && ntr_auto_reconnect && auto_connect_ok
             ? __atomic_load_n((uint32_t *)ntr_ip_octet_incoming, __ATOMIC_RELAXED) : 0;
         ip_octet = __atomic_load_n((uint32_t *)ntr_ip_octet, __ATOMIC_RELAXED);
+
+        const bool user_connect = *(t->work_req_state) == CONNECTION_REQ_STATE_CONNECTING;
+        const bool retry_due = retry_pending && ntr_auto_reconnect && ip_octet &&
+            (int32_t)(iclock() - retry_at_us) >= 0;
 
         if (
             *(t->work_state) == CONNECTION_STATE_DISCONNECTED &&
             (
-                *(t->work_req_state) == CONNECTION_REQ_STATE_CONNECTING ||
-                (ip_octet_incoming && ip_octet_incoming == ip_octet)
+                user_connect ||
+                (ip_octet_incoming && ip_octet_incoming == ip_octet) ||
+                retry_due
             )
         )
         {
             *(t->work_req_state) = CONNECTION_REQ_STATE_NONE;
+            if (user_connect) {
+                auto_connect_ok = true;
+                retry_pending = false;
+            }
             sockfd = tcp_connect(t->port, ip_octet);
             if (!socket_valid(sockfd))
             {
@@ -241,9 +267,18 @@ thread_ret_t tcp_thread_func(void *arg)
                 {
                     *(t->remote_play) = 0;
                 }
+                if (retry_pending) {
+                    retry_delay_ms = MIN(retry_delay_ms * 2, RECONNECT_MAX_MS);
+                    retry_at_us = iclock() + (uint32_t)retry_delay_ms * 1000;
+                }
                 continue;
             }
 
+            if (retry_pending && t->remote_play) {
+                // ask for the stream again; same params are a no-op if it's still running
+                *(t->remote_play) = 1;
+            }
+            retry_pending = false;
             packet_seq = 0;
             *(t->work_state) = CONNECTION_STATE_CONNECTED;
         }
@@ -251,6 +286,8 @@ thread_ret_t tcp_thread_func(void *arg)
         {
             if (*(t->work_req_state) == CONNECTION_REQ_STATE_DISCONNECTING) {
                 RESET_SOCKET();
+                retry_pending = false;
+                auto_connect_ok = false;
                 continue;
             }
 
@@ -404,6 +441,7 @@ thread_ret_t tcp_thread_func(void *arg)
                     continue;
                 }
                 ++packet_seq;
+                rp_sent = true;
 
                 rp_lock_wait(ui_nk_lock);
                 switch (ui_view_mode) {

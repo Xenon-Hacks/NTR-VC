@@ -72,3 +72,29 @@ there too, with a time-since-start stamp). Set the environment variable
   or renderer also writes `ntrviewer_stall_*.dmp` (a Windows minidump).
 - A crash writes `ntrviewer_crash_*.dmp`.
 - Logs rotate at 64 MB (4 files max).
+
+## Stream performance and reconnect (New 3DS XL tuning)
+
+How the picture gets here: NTR-HR on the 3DS encodes each top-screen frame
+as JPEG on up to 3 cores (New 3DS), sends it over UDP using KCP (reliable,
+with FEC), and a TCP link on port 8000 carries control (the remote play
+request, heartbeats and the 3DS's debug log). The viewer acks/nacks KCP,
+reassembles the slices, decodes with libjpeg-turbo and publishes to shared
+memory.
+
+Changes in this build:
+- The process opts out of Windows power throttling (EcoQoS) and keeps 1 ms
+  timers, so receive, KCP replies and decoding keep full speed while the
+  window is minimised.
+- The UDP receive thread runs at highest priority and the decode thread
+  above normal, so a busy bot or game on the PC can't delay acks or frames.
+- Each frame slot is cleared by the bytes it actually used (tens of KB)
+  instead of all 2 MB, and the JPEG decoder is created once instead of
+  every frame.
+- If the TCP link drops while streaming, the viewer reconnects on its own
+  (after 1 s, backing off to every 15 s) and asks for the stream again,
+  instead of waiting for UDP packets that a reset 3DS won't send. Pressing
+  Disconnect stops this. Uses the existing "Auto reconnect" setting.
+- Auto-reconnect no longer misses a still-streaming 3DS after a TCP drop.
+- Windows: an auto-reset event `Local\NTRViewerHR_TopScreenFrame` is set
+  after every published frame, so a reader can wait instead of polling.
