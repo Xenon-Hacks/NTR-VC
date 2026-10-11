@@ -129,3 +129,21 @@ The viewer remembers its settings between launches in `ntrviewer_settings.ini`, 
 - Not saved: the Viewer IP adapter, the input-redirection controller, and fullscreen.
 
 Hooks: `settings_load()` and `settings_apply_windows()` in `main_windows()` (`ntr_config_set_default()` moved there from `main_ntr()` so the saved values aren't overwritten), `settings_apply_ip()` after `ntr_detect_3ds_ip()`, `settings_tick()` in `main_loop()`, `settings_save()` after the main loop, and `settings_auto_*` updates around the two Debug-window checkboxes in `ui_main_nk.c`.
+
+## DS mode receiver
+
+The viewer also listens on **UDP port 8300** for a "DS mode" stream: the two
+256x192 screens of a Nintendo DS game, sent as raw lines. Frames that arrive
+there are shown in the normal top and bottom screen views (and the top screen
+is published to frame sharing too, with width 192 and height 256). Set the
+environment variable `NTRVIEWER_DS_PORT` to use another port.
+
+Nothing on the 3DS sends this stream yet; it is the PC half of DS mode
+streaming. The packet layout is at the top of `ntr_ds.h`. To check the
+receiver without a console, run `tools/ds_test_sender.py` from the NTR-VC
+repository (`python ds_test_sender.py`, or add the PC's IP if the viewer runs
+on another machine): the top screen shows colour bars with a sweeping white
+bar, the bottom screen a scrolling checkerboard.
+
+New files `ntr_ds.c` / `ntr_ds.h`; `ntr_rp.c` gains `rp_publish_frame()`;
+`main.c` starts the receiver thread; `Makefile` builds `ntr_ds.o`.

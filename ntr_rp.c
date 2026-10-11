@@ -1640,6 +1640,31 @@ static void handle_decode_frame_screen(struct rp_buffer_ctx_t *ctx, int top_bot,
     }
 }
 
+/* ntr_ds: show a frame that did not come from NTR-HR (DS mode stream).
+ * width is the short side, height the long side, as in dims_decoded. */
+void rp_publish_frame(int top_bot, const uint8_t *rgba, int width, int height, int size)
+{
+    if (top_bot < 0 || top_bot >= SCREEN_COUNT || width <= 0 || height <= 0 ||
+        width * height > SCREEN_HEIGHT0_2X * SCREEN_WIDTH)
+        return;
+    struct rp_buffer_ctx_t *ctx = &rp_buffer_ctx[top_bot];
+    rp_lock_wait(ctx->status_lock);
+    int index = ctx->index_decode;
+    rp_lock_rel(ctx->status_lock);
+
+    uint8_t *out = ctx->screen_decoded[index];
+    memcpy(out, rgba, (size_t)width * height * GL_CHANNELS_N);
+    struct rp_dims *dims = &ctx->dims_decoded[index];
+    dims->width = width;
+    dims->height = height;
+    dims->is_wide = 0;
+
+    view_mode_t view_mode = __atomic_load_n(&ui_view_mode, __ATOMIC_RELAXED);
+    struct rp_buffer_ctx_t *sync_ctx = view_mode == VIEW_MODE_TOP_BOT && !is_renderer_csc() ? &rp_buffer_ctx[SCREEN_TOP] : NULL;
+    stats_overlay_0(out, top_bot, size, -1, width, height);
+    handle_decode_frame_screen(ctx, top_bot, size, 0, sync_ctx);
+}
+
 #define SCREEN_PROCESS_WORK_COUNT (2)
 uint8_t screen_processing[SCREEN_COUNT][SCREEN_PROCESS_WORK_COUNT][SCREEN_HEIGHT0_2X * SCREEN_WIDTH * GL_CHANNELS_N];
 

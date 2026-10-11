@@ -6,6 +6,7 @@
 #include "ntr_common.h"
 #include "frame_share.h"
 #include "audio_share.h"
+#include "ntr_ds.h"
 #include "diag.h"
 #include "settings.h"
 #ifndef USE_SDL_RENDERER_ONLY
@@ -874,6 +875,13 @@ static void main_ntr(void) {
         program_running = false;
         goto join_udp_recv;
     }
+    thread_t ds_recv_thread;
+    if ((ret = thread_create(ds_recv_thread, ds_recv_thread_func, NULL)))
+    {
+        err_log("ds_recv_thread create failed\n");
+        program_running = false;
+        goto join_ds_recv;
+    }
     thread_t menu_tcp_thread;
     struct tcp_thread_arg menu_tcp_thread_arg = {
         &menu_work_state,
@@ -970,6 +978,8 @@ join_nwm_o3ds_tcp:
 join_nwm_tcp:
     thread_join(menu_tcp_thread);
 join_menu_tcp:
+    thread_join(ds_recv_thread);
+join_ds_recv:
     thread_join(udp_recv_thread);
 join_udp_recv:
 

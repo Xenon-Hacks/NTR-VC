@@ -14,6 +14,7 @@ void input_redirection_send_frame(input_redirection_frame_t *frame);
 
 void rp_buffer_init(void);
 void rp_buffer_destroy(void);
+void rp_publish_frame(int top_bot, const uint8_t *rgba, int width, int height, int size);
 
 #ifdef __cplusplus
 #include <atomic>
