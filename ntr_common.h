@@ -51,12 +51,19 @@ UNUSED static int socket_poll_ms(SOCKET s, int timeout_ms)
     return 0;
 }
 
-UNUSED static bool socket_poll(SOCKET s)
+// Wait until the socket is ready for `events` (POLLIN or POLLOUT).
+// Returns false on a socket error/hangup, after `timeout_ms` with no
+// readiness, or when the program is shutting down. A dead peer must not
+// park the caller here forever: the heartbeat timeout in ntr_hb.c can only
+// run once this returns.
+#define SOCKET_POLL_TIMEOUT_MS 3000
+UNUSED static bool socket_poll(SOCKET s, short events)
 {
+    int waited_ms = 0;
     while (program_running && !kcp_restart) {
         WSAPOLLFD pollfd = {
             .fd = s,
-            .events = POLLIN,
+            .events = events,
             .revents = 0,
         };
         int res = WSAPoll(&pollfd, 1, SOCKET_POLL_INTERVAL_MS);
@@ -64,9 +71,16 @@ UNUSED static bool socket_poll(SOCKET s)
             return false;
         }
         else if (res > 0) {
-            if (pollfd.revents & POLLIN) {
+            if (pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                return false;
+            }
+            if (pollfd.revents & events) {
                 return true;
             }
+        }
+        waited_ms += SOCKET_POLL_INTERVAL_MS;
+        if (waited_ms >= SOCKET_POLL_TIMEOUT_MS) {
+            return false;
         }
     }
     return false;

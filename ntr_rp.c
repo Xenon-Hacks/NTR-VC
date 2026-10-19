@@ -30,6 +30,7 @@ static ikcpcb *kcp;
 static int kcp_cid;
 static int kcp_cid_reset = (IUINT16)-1 & ((1 << CID_NBITS) - 1);
 atomic_bool kcp_active;
+atomic_uint rp_last_packet_us;
 atomic_bool kcp_dq;
 atomic_bool kcp_restart;
 atomic_bool is_lossless;
@@ -2545,9 +2546,21 @@ static void receive_from_socket()
                 }
                 continue;
             }
+            if (err == WSAEMSGSIZE) {
+                // a datagram bigger than buf: not ours, drop it and carry on
+                static uint32_t msgsize_log_time;
+                uint32_t current_time = iclock();
+                if (current_time - msgsize_log_time >= 2000000) {
+                    msgsize_log_time = current_time;
+                    err_log("recvfrom oversized datagram dropped\n");
+                }
+                continue;
+            }
             if (err != WSAETIMEDOUT && err != WSAEWOULDBLOCK) {
-                // err_log("recvfrom failed: %d\n", err);
-                // Sleep(SOCKET_RESET_INTERVAL_MS);
+                // anything else (adapter reset, driver restart): rebind, but
+                // not in a tight loop while the network is still down
+                err_log("recvfrom failed: %d, rebinding\n", err);
+                socket_error_pause();
                 ntr_rp_port_changed = 1; // HACK to restart recv
                 return;
             } else if (err == WSAEWOULDBLOCK) {
@@ -2589,6 +2602,7 @@ static void receive_from_socket()
         }
 
         remote_received = 1;
+        __atomic_store_n(&rp_last_packet_us, iclock(), __ATOMIC_RELAXED);
         DIAG_TICK(DIAG_T_PKT);
 
         DIAG_STAGE(diag_stage_udp, DIAG_UDP_ACTION);

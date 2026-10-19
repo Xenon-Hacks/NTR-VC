@@ -5,6 +5,12 @@
 #include <stdlib.h>
 
 #define HEART_BEAT_EVERY_MS 250
+// the 3DS answers every heartbeat; this long without one means it's gone
+#define HEART_BEAT_TIMEOUT_MS 5000
+
+// stream re-request when video stops but the control link is still up
+#define RP_RESEND_FIRST_MS 5000
+#define RP_RESEND_MAX_MS 60000
 
 // auto-reconnect backoff after the control link drops mid-stream
 #define RECONNECT_FIRST_MS 1000
@@ -78,26 +84,35 @@ static SOCKET tcp_connect(int port, uint32_t addr)
         return INVALID_SOCKET;
     }
 
-    fd_set fdset;
+    // Windows reports a failed non-blocking connect (e.g. port closed) in the
+    // except set, not the write set; without it a refusal looks like a timeout
+    fd_set wset, eset;
     struct timeval tv;
-    FD_ZERO(&fdset);
-    FD_SET(sockfd, &fdset);
+    FD_ZERO(&wset);
+    FD_SET(sockfd, &wset);
+    FD_ZERO(&eset);
+    FD_SET(sockfd, &eset);
     tv.tv_sec = 2;
     tv.tv_usec = 0;
 
-    if (select(sockfd + 1, NULL, &fdset, NULL, &tv) == 1)
+    if (select(sockfd + 1, NULL, &wset, &eset, &tv) >= 1)
     {
-        int so_error;
+        int so_error = 0;
         socklen_t len = sizeof(so_error);
 
         getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char *)&so_error, &len);
 
-        if (so_error == 0)
+        if (so_error == 0 && FD_ISSET(sockfd, &wset))
         {
             err_log("connected\n");
             return sockfd;
         }
-        err_log("connection failed: %d\n", so_error);
+        if (so_error == WSAECONNREFUSED)
+            err_log("connection refused: the 3DS is on the network but nothing listens on port %d\n", port);
+        else
+            err_log("connection failed: %d\n", so_error);
+        closesocket(sockfd);
+        return INVALID_SOCKET;
     }
 
     closesocket(sockfd);
@@ -141,11 +156,11 @@ static int tcp_send(SOCKET sockfd, char *buf, int size)
     while (program_running && tmpsize) {
         if ((ret = send(sockfd, &buf[pos], tmpsize, 0)) < 0) {
             if (socket_errno() == WSAEWOULDBLOCK) {
-                if (socket_poll(sockfd)) {
+                if (socket_poll(sockfd, POLLOUT)) {
                     continue;
                 } else {
                     if (program_running)
-                        err_log("socket poll failed: %d\n", socket_errno());
+                        err_log("socket send wait failed: %d\n", socket_errno());
                     return -1;
                 }
             }
@@ -168,11 +183,11 @@ static int tcp_recv(SOCKET sockfd, char *buf, int size)
             if (ret < 0) {
                 if (socket_errno() == WSAEWOULDBLOCK) {
                     if (pos) {
-                        if (socket_poll(sockfd)) {
+                        if (socket_poll(sockfd, POLLIN)) {
                             continue;
                         } else {
                             if (program_running)
-                                err_log("socket poll failed: %d\n", socket_errno());
+                                err_log("socket recv wait failed: %d\n", socket_errno());
                             return -1;
                         }
                     } else {
@@ -262,6 +277,10 @@ thread_ret_t tcp_thread_func(void *arg)
     int retry_delay_ms = 0;
     uint32_t retry_at_us = 0;
     int ping_state = 0;            // 1 answers ping, -1 doesn't, 0 not checked yet
+    uint32_t last_reply_us = 0;    // last heartbeat reply from the 3DS
+    int resend_delay_ms = RP_RESEND_FIRST_MS;
+    uint32_t resend_at_us = 0;     // last time the stream was re-requested
+    uint32_t rp_sent_us = 0;       // last time 901 was actually sent
     while (program_running)
     {
         uint32_t ip_octet_incoming;
@@ -324,6 +343,9 @@ thread_ret_t tcp_thread_func(void *arg)
             ping_state = 0;
             retry_pending = false;
             packet_seq = 0;
+            last_reply_us = iclock();
+            resend_delay_ms = RP_RESEND_FIRST_MS;
+            resend_at_us = 0;
             *(t->work_state) = CONNECTION_STATE_CONNECTED;
         }
         else if (*(t->work_state) == CONNECTION_STATE_CONNECTED)
@@ -357,6 +379,7 @@ thread_ret_t tcp_thread_func(void *arg)
                     RESET_SOCKET();
                     continue;
                 }
+                last_reply_us = iclock();
                 if (header.cmd == 0)
                 {
                     // err_log("heartbeat packet: size %d\n", header.data_len);
@@ -407,6 +430,15 @@ thread_ret_t tcp_thread_func(void *arg)
                 }
             }
 
+            // A 3DS that drops off Wi-Fi without closing the connection never
+            // produces a recv error, so missing replies are the only sign.
+            if (t->remote_play && (int32_t)(iclock() - last_reply_us) > HEART_BEAT_TIMEOUT_MS * 1000)
+            {
+                err_log("3DS stopped answering heartbeats for %d ms\n", HEART_BEAT_TIMEOUT_MS);
+                RESET_SOCKET();
+                continue;
+            }
+
             ret = tcp_send_packet_header(sockfd, packet_seq, 0, 0, 0, 0, 0);
             if (ret < 0)
             {
@@ -416,6 +448,32 @@ thread_ret_t tcp_thread_func(void *arg)
                 continue;
             }
             ++packet_seq;
+
+            // The control link can stay up while the stream itself dies
+            // (NWM restarted or hung). Ask for it again after a silence, with
+            // backoff so a 3DS that can't stream isn't nagged every 5 s.
+            if (t->remote_play && rp_sent && ntr_auto_reconnect)
+            {
+                const uint32_t now_us = iclock();
+                const uint32_t last_pkt_us = __atomic_load_n(&rp_last_packet_us, __ATOMIC_RELAXED);
+                // quiet since the later of: last video packet, last stream request
+                uint32_t since_us = now_us - last_pkt_us;
+                if ((int32_t)(last_pkt_us - rp_sent_us) < 0)
+                    since_us = now_us - rp_sent_us;
+                if (resend_at_us && (int32_t)(last_pkt_us - resend_at_us) > 0)
+                {
+                    // video came back after a re-request
+                    resend_delay_ms = RP_RESEND_FIRST_MS;
+                    resend_at_us = 0;
+                }
+                if ((int32_t)since_us > resend_delay_ms * 1000)
+                {
+                    err_log("no video for %d s, asking the 3DS for the stream again\n", resend_delay_ms / 1000);
+                    *(t->remote_play) = 1;
+                    resend_at_us = now_us;
+                    resend_delay_ms = MIN(resend_delay_ms * 2, RP_RESEND_MAX_MS);
+                }
+            }
 
             const uint32_t rp_send_next_us = iclock();
 
@@ -486,6 +544,7 @@ thread_ret_t tcp_thread_func(void *arg)
                 }
                 ++packet_seq;
                 rp_sent = true;
+                rp_sent_us = iclock();
 
                 rp_lock_wait(ui_nk_lock);
                 switch (ui_view_mode) {

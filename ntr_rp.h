@@ -36,6 +36,9 @@ extern atomic_bool kcp_active;
 extern atomic_bool kcp_dq;
 extern atomic_bool kcp_restart;
 extern atomic_bool is_lossless;
+// iclock() of the last UDP packet from the 3DS (0 until the first one);
+// ntr_hb.c uses it to re-request the stream after a silence
+extern atomic_uint rp_last_packet_us;
 
 #include "ui_common_sdl.h"
 #include "rp_syn.h"

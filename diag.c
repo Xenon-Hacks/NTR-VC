@@ -68,6 +68,8 @@ static void make_stamp(void)
 static void open_log(void)
 {
     char name[128];
+    /* part 0 is the first log; rotation cycles through part2..part5 and
+       never comes back to append to the first file */
     if (log_part)
         snprintf(name, sizeof(name), "ntrviewer_log_%s_part%d.txt", stamp, log_part + 1);
     else
@@ -281,7 +283,7 @@ static DIAG_THREAD_RET diag_main(void *arg)
 
         if (log_size() > LOG_ROTATE_BYTES) {
             fprintf(stderr, "[%s] DIAG log full, rotating\n", diag_ts());
-            log_part = (log_part + 1) % 4;
+            log_part = log_part % 4 + 1;
             open_log();
         }
     }

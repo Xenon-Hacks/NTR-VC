@@ -104,6 +104,27 @@ Changes in this build:
 - Windows: an auto-reset event `Local\NTRViewerHR_TopScreenFrame` is set
   after every published frame, so a reader can wait instead of polling.
 
+Added in 2.5.0 (drop recovery):
+- Heartbeat timeout: the 3DS answers every heartbeat, so 5 s without a
+  reply now counts as a disconnect ("3DS stopped answering heartbeats") and
+  starts the reconnect and ping logic above. Before, a 3DS that vanished
+  from Wi-Fi without closing the connection was never noticed.
+- The TCP send/receive wait now waits for the right socket event, gives up
+  after 3 s and returns on a socket error, so a half-dead link can't park the
+  control thread forever or spin a CPU core.
+- If video stops for 5 s while the control link is still up, the viewer asks
+  the 3DS for the stream again ("no video for N s, asking the 3DS for the
+  stream again"), backing off to once a minute, and resets when video
+  returns. Whether a hung NTR restarts its stream on that request is up to
+  the 3DS side.
+- A refused connection is logged as "connection refused" right away instead
+  of as a 2 s timeout.
+- A UDP receive error (adapter reset, driver restart) waits 2 s before
+  rebinding instead of looping, and oversized datagrams are dropped.
+- With no audio playback device the open is retried every 5 s instead of on
+  every audio packet (shared audio for the bot works either way).
+- Log rotation no longer appends to the first log file again after part 5.
+
 ## Audio sharing
 
 The game audio NTR-HR sends (NTR-HR+ audio, turned on in the viewer's

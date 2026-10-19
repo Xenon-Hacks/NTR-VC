@@ -20,11 +20,19 @@ static int audio_prime_frames = AUDIO_PRIME_FRAMES_MIN;
 // max silence frames per gap, larger gaps just resync
 #define AUDIO_MAX_GAP_FILL (8)
 
+// with no playback device, retry this often (not on every packet, which
+// would be hundreds of device opens and log lines a second)
+#define AUDIO_OPEN_RETRY_MS (5000)
+static uint32_t audio_open_failed_at; // SDL ticks of the last failed open, 0 if none
+
 static bool ntr_audio_open(void)
 {
     if (audio_stream)
         return true;
     if (audio_shutting_down)
+        return false;
+    uint32_t now = (uint32_t)SDL_GetTicks();
+    if (audio_open_failed_at && now - audio_open_failed_at < AUDIO_OPEN_RETRY_MS)
         return false;
 
     SDL_AudioSpec spec;
@@ -34,9 +42,14 @@ static bool ntr_audio_open(void)
 
     audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
     if (!audio_stream) {
-        err_log("SDL_OpenAudioDeviceStream: %s\n", SDL_GetError());
+        if (!audio_open_failed_at)
+            err_log("SDL_OpenAudioDeviceStream: %s (retrying every %d s, shared audio still works)\n", SDL_GetError(), AUDIO_OPEN_RETRY_MS / 1000);
+        audio_open_failed_at = now ? now : 1;
         return false;
     }
+    if (audio_open_failed_at)
+        err_log("audio playback device opened\n");
+    audio_open_failed_at = 0;
     // resume happens once primed
     return true;
 }
