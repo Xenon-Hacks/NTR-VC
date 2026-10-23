@@ -1,6 +1,6 @@
 # Third-party notices
 
-NTR-VC is based on [NTRViewer-HR](https://github.com/xzn/ntrviewer-hr) (MIT License, Copyright (c) 2025 xzn). It contains or links the third-party components below. The full license texts are in the source zip (`ntrviewer-hr-frame-share.zip`) at the paths shown, and in the `licenses/` folder of every release zip.
+NTR-VC is based on [NTRViewer-HR](https://github.com/xzn/ntrviewer-hr) (MIT License, Copyright (c) 2025 xzn). It contains or links the third-party components below. The full license texts are in this repository at the paths shown, and in the `licenses/` folder of every release zip.
 
 ## Bundled in the source
 
@@ -9,7 +9,7 @@ NTR-VC is based on [NTRViewer-HR](https://github.com/xzn/ntrviewer-hr) (MIT Lice
 | [Nuklear](https://github.com/Immediate-Mode-UI/Nuklear) (modified) | MIT or Public Domain (Unlicense), at your choice | `nuklear/LICENSE-original`, `nuklear/LICENSE.md` |
 | [KCP](https://github.com/skywind3000/kcp) | MIT, Copyright (c) 2017 Lin Wei | `LICENSE-kcp` |
 | [Fecal](https://github.com/catid/fecal) (modified) | BSD 3-Clause, Copyright (c) 2017 Christopher A. Taylor | `fecal/LICENSE-original.md`, `fecal/LICENSE.md` |
-| [libjpeg-turbo](https://libjpeg-turbo.org/) 3.1.1 (embedded) | IJG License and BSD 3-Clause; SIMD code under zlib | `jpeg_turbo/LICENSE.md`, plus `licenses/libjpeg-turbo-README.ijg` in this repo |
+| [libjpeg-turbo](https://libjpeg-turbo.org/) 3.1.1 (embedded) | IJG License and BSD 3-Clause; SIMD code under zlib | `jpeg_turbo/LICENSE.md`, `licenses/libjpeg-turbo-README.ijg` |
 | [stb_image](https://github.com/nothings/stb) | Public Domain or MIT | end of `stb_image.h` |
 | [Clarity icons](https://v12.clarity.design/) (modified SVG cursors) | MIT | `clarity/LICENSE.md` |
 | [volk](https://github.com/zeux/volk) | MIT | end of `volk.h` |
@@ -31,4 +31,4 @@ Not every component is compiled into the "lite" Windows build; all are listed be
 | MinGW-w64 runtime and winpthreads | ZPL / MIT-style |
 | GCC runtime (libgcc, libstdc++) | GPL-3.0 with GCC Runtime Library Exception (no obligations for this use) |
 
-The release workflow copies the MSYS2 license files for these packages into the release zip's `licenses/` folder. Every release also attaches the complete application source (`ntrviewer-hr-frame-share.zip`), so the viewer can be rebuilt against a modified libiconv as the LGPL requires.
+The release workflow copies the MSYS2 license files for these packages into the release zip's `licenses/` folder. Every release also attaches the complete source of that build (`NTR-VC-source.zip`), so the viewer can be rebuilt against a modified libiconv as the LGPL requires.

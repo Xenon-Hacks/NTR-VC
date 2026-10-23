@@ -1648,6 +1648,11 @@ void rp_publish_frame(int top_bot, const uint8_t *rgba, int width, int height, i
     if (top_bot < 0 || top_bot >= SCREEN_COUNT || width <= 0 || height <= 0 ||
         width * height > SCREEN_HEIGHT0_2X * SCREEN_WIDTH)
         return;
+    // While NTR-HR is streaming, its decode thread writes into the same frame
+    // buffers; a DS mode frame now would race with it, so NTR-HR wins.
+    uint32_t last_ntr_packet_us = __atomic_load_n(&rp_last_packet_us, __ATOMIC_RELAXED);
+    if (last_ntr_packet_us && (uint32_t)(iclock() - last_ntr_packet_us) < 1000000)
+        return;
     struct rp_buffer_ctx_t *ctx = &rp_buffer_ctx[top_bot];
     rp_lock_wait(ctx->status_lock);
     int index = ctx->index_decode;

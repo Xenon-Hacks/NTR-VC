@@ -1,4 +1,4 @@
-name: Build NTRViewer-HR (frame sharing, lite)
+name: Build NTR-VC
 on:
   workflow_dispatch:
     inputs:
@@ -22,36 +22,30 @@ jobs:
           update: true
           install: |
             zip
-            unzip
             make
+            git
             mingw-w64-x86_64-sdl3
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-nasm
       - uses: actions/checkout@v5
-        with:
-          path: repo
-      - name: Unpack and build
+      - name: Build
         run: |
-          unzip -q repo/ntrviewer-hr-frame-share.zip
-          cd ntrviewer-hr-full-width
           mkdir -p lib
           make -j$(nproc) LITE=1
-          cd ..
-          cp ntrviewer-hr-full-width/ntrviewer.exe .
+      - name: Package
+        run: |
           mkdir -p pkg/licenses
-          cp ntrviewer.exe repo/LICENSE repo/THIRD_PARTY_NOTICES.md pkg/
-          cp repo/tools/ds_test_sender.py pkg/
-          cp repo/licenses/* pkg/licenses/
-          src=ntrviewer-hr-full-width
-          cp $src/LICENSE pkg/licenses/ntrviewer-hr-LICENSE
-          cp $src/LICENSE-kcp pkg/licenses/kcp-LICENSE
-          cp $src/nuklear/LICENSE-original pkg/licenses/nuklear-LICENSE
-          cp $src/fecal/LICENSE-original.md pkg/licenses/fecal-LICENSE.md
-          cp $src/jpeg_turbo/LICENSE.md pkg/licenses/libjpeg-turbo-LICENSE.md
-          cp $src/clarity/LICENSE.md pkg/licenses/clarity-LICENSE.md
-          cp $src/rapidjson/license.txt pkg/licenses/rapidjson-LICENSE.txt
-          cp $src/models-se/LICENSE pkg/licenses/realcugan-models-LICENSE
-          sed -n '/available under 2 licenses/,$p' $src/stb_image.h > pkg/licenses/stb_image-LICENSE.txt
+          cp ntrviewer.exe LICENSE THIRD_PARTY_NOTICES.md README.md NTR-VC.md pkg/
+          cp tools/ds_test_sender.py pkg/
+          cp licenses/* pkg/licenses/
+          cp LICENSE-kcp pkg/licenses/kcp-LICENSE
+          cp nuklear/LICENSE-original pkg/licenses/nuklear-LICENSE
+          cp fecal/LICENSE-original.md pkg/licenses/fecal-LICENSE.md
+          cp jpeg_turbo/LICENSE.md pkg/licenses/libjpeg-turbo-LICENSE.md
+          cp clarity/LICENSE.md pkg/licenses/clarity-LICENSE.md
+          cp rapidjson/license.txt pkg/licenses/rapidjson-LICENSE.txt
+          cp models-se/LICENSE pkg/licenses/realcugan-models-LICENSE
+          sed -n '/available under 2 licenses/,$p' stb_image.h > pkg/licenses/stb_image-LICENSE.txt
           # Licenses of the MSYS2 libraries linked into the exe
           for p in sdl3 libiconv winpthreads mingw-w64-crt headers-git; do
             for d in /mingw64/share/licenses/*; do
@@ -59,11 +53,14 @@ jobs:
             done
           done
           ls -R pkg
-          (cd pkg && zip -r ../NTRViewer-HR-FrameShare-Lite-Win-x64.zip .)
+          (cd pkg && zip -r ../NTR-VC-Win-x64.zip .)
+          # Full source of this build, for the LGPL relinking offer (SDL3 / libiconv are static)
+          git config --global --add safe.directory '*'
+          git archive --format=zip --prefix=NTR-VC-source/ -o NTR-VC-source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
-          name: NTRViewer-HR-FrameShare-Lite-Win-x64
-          path: NTRViewer-HR-FrameShare-Lite-Win-x64.zip
+          name: NTR-VC-Win-x64
+          path: NTR-VC-Win-x64.zip
       - name: Publish release
         if: ${{ inputs.release_tag != '' }}
         uses: softprops/action-gh-release@v2
@@ -72,9 +69,9 @@ jobs:
           name: NTR-VC v${{ inputs.release_tag }}
           target_commitish: ${{ github.sha }}
           files: |
-            NTRViewer-HR-FrameShare-Lite-Win-x64.zip
-            repo/ntrviewer-hr-frame-share.zip
+            NTR-VC-Win-x64.zip
+            NTR-VC-source.zip
           body: |
-            Based on NTRViewer-HR by xzn (https://github.com/xzn/ntrviewer-hr), MIT License. License files are inside the zip; full source is ntrviewer-hr-frame-share.zip.
+            NTR-VC is a fork of NTRViewer-HR by xzn (https://github.com/xzn/ntrviewer-hr, MIT License) with frame and audio sharing for bots, saved settings, a diagnostic log and automatic stream-drop recovery.
 
-            Diagnostic build. Writes ntrviewer_log_<date>_<time>.txt next to the exe with heartbeat (HB) lines and a stall watchdog, to help track down long-run freezes. See the "Diagnostic log" section of FRAME_SHARE_README.md in the source zip.
+            Download NTR-VC-Win-x64.zip, unzip it and run ntrviewer.exe. License files are in its licenses folder, and NTR-VC.md describes every change. NTR-VC-source.zip is the full source of this build.

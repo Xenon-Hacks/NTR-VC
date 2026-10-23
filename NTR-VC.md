@@ -1,52 +1,48 @@
-# NTRViewer-HR with frame sharing
+# NTR-VC
 
-This is NTRViewer-HR (MIT licence -- see LICENSE) plus one small feature:
-every decoded top-screen frame, and the connection quality, is published
-to shared memory, so another program (the Sweet Scent bot) can read the
-game picture **while this window is minimised**. Everything else behaves
-exactly like the normal viewer.
+NTR-VC is NTRViewer-HR by xzn (https://github.com/xzn/ntrviewer-hr,
+MIT License, see LICENSE) with additions for running the viewer next to a
+bot or for hours unattended:
 
-What changed (also in `frame_share.patch`):
-- new files `frame_share.c` / `frame_share.h`
-- `ntr_rp.c`: publish each finished top-screen frame
-- `ui_common_sdl.c`: publish the connection quality
-- `main.c`: set up / clean up the shared memory
-- `Makefile`: build `frame_share.o`
+- every decoded top-screen frame, and the connection quality, is published
+  to shared memory, so another program (for example an OpenCV bot) can read
+  the game picture while this window is minimised
+- the game audio is published to shared memory too
+- settings are saved between launches
+- a diagnostic log, and automatic recovery when the 3DS stream drops
+- a DS mode receiver (PC side only for now)
 
-## Build it on GitHub (recommended, nothing to install)
+Everything else behaves like the normal viewer. All credit for the viewer
+itself goes to xzn; please report problems with this version to the
+NTR-VC repository, not upstream.
 
-1. Create a new repository on GitHub (private is fine), e.g.
-   `ntrviewer-hr-frame-share`.
-2. Put the contents of this folder in it, **including the hidden
-   `.github` folder** (it contains the build recipes). The browser upload
-   can skip hidden folders, so the easiest way is GitHub Desktop: clone the
-   empty repository, copy these files into it, then Commit and Push.
-3. On the repository's page: **Actions** tab -> enable workflows if asked
-   -> pick **windows_app_lite.yml** -> **Run workflow**.
-4. After roughly 5-10 minutes, open the finished run; under **Artifacts**
-   download **NTRViewer-HR-Lite-Win-x64.zip**. It contains `ntrviewer.exe`.
-5. Use that `ntrviewer.exe` instead of the original, with the same
-   settings (3DS IP address etc.).
+NTR-VC is a GitHub fork of upstream, branched from commit 627c018
+(2026-09-18), so `git diff 627c018` shows every change.
 
-## Build it locally (advanced)
+New files: `frame_share.c/.h`, `audio_share.c/.h`, `diag.c/.h`,
+`settings.c/.h`, `ntr_ds.c/.h`. Changed upstream files: `Makefile`,
+`const.h`, `main.c`, `ntr_audio.c`, `ntr_common.h`, `ntr_hb.c`, `ntr_rp.c`,
+`ntr_rp.h`, `ui_common_sdl.c`, `ui_main_nk.c`.
 
-Install MSYS2, open the **MINGW64** shell, then:
+## Build it
+
+The easiest way is GitHub Actions: in the NTR-VC repository, run the
+**Build NTR-VC** workflow from the Actions tab and download the zip
+from the finished run.
+
+To build locally on Windows, install MSYS2, open the **MINGW64** shell, then
+from the repository folder:
 
     pacman -S make zip mingw-w64-x86_64-sdl3 mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm
-    mkdir lib
-    ln -s "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\dxcompiler.lib" lib/dxcompiler.lib
+    mkdir -p lib
     make -j$(nproc) LITE=1
 
-(The `dxcompiler.lib` line needs the Windows 10/11 SDK installed; the
-version number in the path may differ on your PC.)
+This builds the "lite" `ntrviewer.exe` (SDL renderer only), which is what the
+releases contain.
 
 ## Updating to a newer NTRViewer-HR later
 
-Get the new source, then from its folder, in the MSYS2 or Git Bash shell:
-
-    patch -p2 < frame_share.patch
-
-and build it again as above.
+Merge upstream's `full-width` branch into `main` and fix any conflicts.
 
 ## For programs reading the frames
 
@@ -82,7 +78,7 @@ request, heartbeats and the 3DS's debug log). The viewer acks/nacks KCP,
 reassembles the slices, decodes with libjpeg-turbo and publishes to shared
 memory.
 
-Changes in this build:
+Changes:
 - The process opts out of Windows power throttling (EcoQoS) and keeps 1 ms
   timers, so receive, KCP replies and decoding keep full speed while the
   window is minimised.
@@ -135,8 +131,7 @@ arrives, before playback, so the PC's volume, mute and output device make
 no difference to it, and it keeps working with no audio device at all.
 Small gaps are filled with silence, as for playback. Layout and how to read
 it safely are at the top of `audio_share.h`. Files: `audio_share.c` /
-`audio_share.h`, hooked in `ntr_audio.c` and `main.c` (not in
-`frame_share.patch`).
+`audio_share.h`, hooked in `ntr_audio.c` and `main.c`.
 
 ## Saved settings
 
@@ -161,9 +156,9 @@ environment variable `NTRVIEWER_DS_PORT` to use another port.
 
 Nothing on the 3DS sends this stream yet; it is the PC half of DS mode
 streaming. The packet layout is at the top of `ntr_ds.h`. To check the
-receiver without a console, run `tools/ds_test_sender.py` from the NTR-VC
-repository (`python ds_test_sender.py`, or add the PC's IP if the viewer runs
-on another machine): the top screen shows colour bars with a sweeping white
+receiver without a console, run `ds_test_sender.py` (in the release zip and in
+the repository's `tools` folder; add the PC's IP if the viewer runs on
+another machine): the top screen shows colour bars with a sweeping white
 bar, the bottom screen a scrolling checkerboard.
 
 New files `ntr_ds.c` / `ntr_ds.h`; `ntr_rp.c` gains `rp_publish_frame()`;
