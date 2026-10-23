@@ -31,7 +31,14 @@ jobs:
       - name: Build
         run: |
           mkdir -p lib
-          make -j$(nproc) LITE=1
+          set +e
+          make -j$(nproc) LITE=1 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            # show the compiler errors as annotations on the run page
+            grep -E "error|Error|\*\*\*" build.log | head -30 | sed 's/^/::error::/'
+          fi
+          exit $status
       - name: Package
         run: |
           mkdir -p pkg/licenses
