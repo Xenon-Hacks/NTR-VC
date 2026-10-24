@@ -163,3 +163,54 @@ bar, the bottom screen a scrolling checkerboard.
 
 New files `ntr_ds.c` / `ntr_ds.h`; `ntr_rp.c` gains `rp_publish_frame()`;
 `main.c` starts the receiver thread; `Makefile` builds `ntr_ds.o`.
+
+## Game memory for other programs (mem_proxy)
+
+Needs the NTR-HR build with memory commands (ntr-hr-memread). With it, other
+programs on the PC can read and write the running game's memory through the
+viewer, which holds NTR-HR's only control link (TCP port 8000).
+
+Local UDP server on `127.0.0.1:45988`, in Azahar's RPC format: scripts written
+for Azahar (`scripting/citra.py`, `AzaharRPC.py`, port 45987) work on a real
+3DS by changing the port. Request: `u32 version (1 or 2), u32 id, u32 type,
+u32 data size, data`; the reply has the same header. Types:
+
+| type | request data | reply data |
+|---|---|---|
+| 1 read | u32 addr, u32 size (up to 0x8000) | the bytes; empty on failure |
+| 2 write | u32 addr, u32 size, bytes | empty on success; no reply on failure |
+| 3 / 0x100 processes | u32 start, u32 max | u32 count, then {u32 pid, u64 title id, char name[8]} each |
+| 4 process | u32 mode (0 get, 1 set), u32 pid | get: u32 pid; set: empty. Default: the game |
+| 0x101 read | u32 pid, u32 addr, u32 size | u32 status, u32 pid, u32 detail, bytes |
+| 0x102 write | u32 pid, u32 addr, u32 flags, bytes | u32 status, u32 pid, u32 detail |
+| 0x103 status | none | u32 link up, memread supported, requests, failures, last and average round trip (us), game pid |
+
+pid `0xFFFFFFFF` means the current game. Write flag bit 0 allows read-only
+pages (code patches). Status 0 is OK; 1-7 come from the 3DS (1 size, 2 no
+game, 3 open failed, 4 unmapped (detail = first bad address), 5 not writable,
+6 DMA failed, 7 data lost); 0x100 no connection to the 3DS, 0x101 timeout
+(an NTR-HR without memory commands), 0x102 bad request.
+
+NTR-HR commands on port 8000 (NTR 3.6 numbering, replies keep the request's
+seq): 5 list processes (reply args status, count, game pid; data 24-byte
+entries {pid, reserved, title id, name[8]}), 9 read (args pid, addr, size up
+to 0x4000; reply args status, pid, detail and the bytes), 10 write (args pid,
+addr, size, flags plus the data; reply args status, pid, detail).
+
+How it fits in the control loop (`ntr_hb.c`, menu link only): every waiting
+packet is read each pass instead of one per 250 ms; new memory commands are
+sent at once, and while replies are outstanding the socket is checked every
+2 ms. The heartbeat keeps its own 250 ms timer. TCP_NODELAY is on. Writes go
+out only once this connection has answered a memory command (otherwise a
+process-list probe goes first), because an NTR-HR without the commands would
+not read the write's data and the link would break. A request with no answer
+fails after 2 s; a dropped link fails everything pending at once.
+
+Test without a 3DS: `tools/mem_proxy_test/harness.c` runs `mem_proxy.c` in the
+same loop shape against a fake 3DS (see the comment at its top).
+
+`ntrviewer.exe --connect` connects and starts the stream at launch (the same as pressing
+Connect once, using the saved 3DS IP), for bots that run without anyone at the window.
+
+New files `mem_proxy.c` / `mem_proxy.h`; `ntr_hb.c` services the commands;
+`main.c` starts and stops the server; `Makefile` builds `mem_proxy.o`.
