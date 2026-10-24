@@ -158,6 +158,7 @@ int opt_flag_csc, opt_flag_sdl_hw, opt_flag_sdl_sw;
 
 #define mod_name_csc "csc"
 
+static int opt_flag_connect;
 static struct option long_options[] = {
 #ifdef _WIN32
     {opt_name_csc, no_argument, &opt_flag_csc, 1},
@@ -175,6 +176,7 @@ static struct option long_options[] = {
 #endif
     {opt_name_sdl_hw, no_argument, &opt_flag_sdl_hw, 1},
     {opt_name_sdl_sw, no_argument, &opt_flag_sdl_sw, 1},
+    {"connect", no_argument, &opt_flag_connect, 1},   /* connect and start the stream at launch */
     {0, 0, 0, 0}};
 
 static void add_arg(enum ui_renderer_t arg, const char *name) {
@@ -863,6 +865,10 @@ static void main_ntr(void) {
 
     ntr_detect_3ds_ip();
     settings_apply_ip();      /* settings: the 3DS IP saved last time */
+    if (opt_flag_connect) {   /* --connect: same as pressing Connect once (for unattended bots) */
+        menu_remote_play = 1;
+        menu_work_req_state = CONNECTION_REQ_STATE_CONNECTING;
+    }
     ntr_get_adapter_list();
     ntr_try_auto_select_adapter();
     ui_update_game_controllers();

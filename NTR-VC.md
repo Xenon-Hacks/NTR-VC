@@ -209,5 +209,8 @@ fails after 2 s; a dropped link fails everything pending at once.
 Test without a 3DS: `tools/mem_proxy_test/harness.c` runs `mem_proxy.c` in the
 same loop shape against a fake 3DS (see the comment at its top).
 
+`ntrviewer.exe --connect` connects and starts the stream at launch (the same as pressing
+Connect once, using the saved 3DS IP), for bots that run without anyone at the window.
+
 New files `mem_proxy.c` / `mem_proxy.h`; `ntr_hb.c` services the commands;
 `main.c` starts and stops the server; `Makefile` builds `mem_proxy.o`.
