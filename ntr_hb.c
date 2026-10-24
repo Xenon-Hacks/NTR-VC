@@ -112,6 +112,16 @@ static SOCKET tcp_connect(int port, uint32_t addr)
             // small packets (heartbeats, memory commands) go out at once
             int one = 1;
             setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
+#ifdef _WIN32
+            // ACK every segment at once. A memory reply bigger than one segment otherwise
+            // waits ~50 ms: the 3DS (Nagle) holds its last segment until the first is ACKed,
+            // and Windows delays that ACK. SIO_TCP_SET_ACK_FREQUENCY = _WSAIOW(IOC_VENDOR, 23).
+            {
+                DWORD ack_freq = 1, bytes = 0;
+                if (WSAIoctl(sockfd, _WSAIOW(IOC_VENDOR, 23), &ack_freq, sizeof(ack_freq), NULL, 0, &bytes, NULL, NULL) != 0)
+                    err_log("ack frequency not set: %d\n", socket_errno());
+            }
+#endif
             return sockfd;
         }
         if (so_error == WSAECONNREFUSED)
