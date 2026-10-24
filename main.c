@@ -5,6 +5,7 @@
 #include "ui_renderer_sdl.h"
 #include "ntr_common.h"
 #include "frame_share.h"
+#include "mem_proxy.h"
 #include "audio_share.h"
 #include "ntr_ds.h"
 #include "diag.h"
@@ -856,6 +857,7 @@ static void main_ntr(void) {
 
     frame_share_init();   /* frame_share: lets other programs read the top screen */
     audio_share_init();   /* audio_share: ... and hear the game audio */
+    mem_proxy_init();     /* mem_proxy: game memory for other programs, UDP 127.0.0.1:45988 */
     rp_buffer_init();
     rp_lock_init(ui_nk_lock);
 
@@ -985,6 +987,7 @@ join_udp_recv:
 
     rp_lock_close(sdl_cursors_lock);
     rp_buffer_destroy();
+    mem_proxy_shutdown();
     frame_share_close();
     audio_share_close();
     diag_close();

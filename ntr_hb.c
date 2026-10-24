@@ -1,6 +1,10 @@
 #include "ntr_hb.h"
 #include "main.h"
 #include "ntr_common.h"
+#include "mem_proxy.h"
+#ifndef _WIN32
+#include <netinet/tcp.h>
+#endif
 
 #include <stdlib.h>
 
@@ -105,6 +109,9 @@ static SOCKET tcp_connect(int port, uint32_t addr)
         if (so_error == 0 && FD_ISSET(sockfd, &wset))
         {
             err_log("connected\n");
+            // small packets (heartbeats, memory commands) go out at once
+            int one = 1;
+            setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
             return sockfd;
         }
         if (so_error == WSAECONNREFUSED)
@@ -225,6 +232,85 @@ static int tcp_send_packet_header(SOCKET s, uint32_t seq, uint32_t type, uint32_
     return tcp_send(s, buf, size);
 }
 
+// Largest reply data accepted from the 3DS (memory replies are at most 0x4000)
+#define TCP_MAX_DATA_LEN (4 * 1024 * 1024)
+
+// Reads and handles one packet from the 3DS if one is waiting.
+// 1 = handled one, 0 = nothing waiting, -1 = the link is broken.
+static int tcp_handle_packet(SOCKET sockfd, bool mem_link, uint32_t *last_reply_us)
+{
+    struct tcp_packet_hdr header = {0};
+    int ret = tcp_recv(sockfd, (char *)&header, sizeof(header));
+    if (ret < 0 || !program_running)
+    {
+        if (program_running)
+            err_log("tcp recv error: %d\n", socket_errno());
+        return -1;
+    }
+    if (ret == 0)
+        return 0;
+    if (header.magic != TCP_MAGIC)
+    {
+        if (program_running)
+            err_log("broken protocol\n");
+        return -1;
+    }
+    *last_reply_us = iclock();
+
+    if (header.data_len > TCP_MAX_DATA_LEN)
+    {
+        err_log("packet %d too large: %u\n", (int)header.cmd, (unsigned)header.data_len);
+        return -1;
+    }
+    char *buf = NULL;
+    if (header.data_len)
+    {
+        buf = malloc(header.data_len + 1);
+        if (!buf)
+        {
+            err_log("tcp recv alloc failed: %d\n", (int)header.data_len);
+            return -1;
+        }
+        if ((ret = tcp_recv(sockfd, buf, header.data_len)) < 0)
+        {
+            if (program_running)
+                err_log("tcp recv error: %d\n", socket_errno());
+            free(buf);
+            return -1;
+        }
+        if (ret == 0)
+        {
+            // data not there yet: wait for it (tcp_recv only waits once it has started)
+            if (!socket_poll(sockfd, POLLIN) || (ret = tcp_recv(sockfd, buf, header.data_len)) <= 0)
+            {
+                if (program_running)
+                    err_log("tcp recv data error: %d\n", socket_errno());
+                free(buf);
+                return -1;
+            }
+        }
+        buf[header.data_len] = 0;
+    }
+
+    if (header.cmd == 0)
+    {
+        // heartbeat reply: the 3DS's debug log
+        if (buf)
+            fprintf(stderr, "%s", buf);
+    }
+    else if (mem_link && (header.cmd == MEM_PROXY_CMD_LISTPROCESS || header.cmd == MEM_PROXY_CMD_READMEM || header.cmd == MEM_PROXY_CMD_WRITEMEM))
+    {
+        // a reply that matches nothing belongs to a request that already timed out
+        mem_proxy_reply(header.seq, header.cmd, header.args, (const uint8_t *)buf, header.data_len);
+    }
+    else if (header.data_len)
+    {
+        err_log("unhandled packet type %d: size %d\n", header.cmd, header.data_len);
+    }
+    free(buf);
+    return 1;
+}
+
 static bool rp_send_need_update;
 static uint32_t rp_send_last_us;
 static struct ntr_rp_config_t rp_config_last;
@@ -252,6 +338,8 @@ thread_ret_t tcp_thread_func(void *arg)
 #define RESET_SOCKET() do { \
     socket_close(sockfd); \
     sockfd = INVALID_SOCKET; \
+    if (mem_link) \
+        mem_proxy_link(false); \
     *(t->work_state) = CONNECTION_STATE_DISCONNECTED; \
     *(t->work_req_state) = CONNECTION_REQ_STATE_NONE; \
     if (t->remote_play) { \
@@ -281,6 +369,9 @@ thread_ret_t tcp_thread_func(void *arg)
     int resend_delay_ms = RP_RESEND_FIRST_MS;
     uint32_t resend_at_us = 0;     // last time the stream was re-requested
     uint32_t rp_sent_us = 0;       // last time 901 was actually sent
+    uint32_t next_hb_us = 0;       // when the next heartbeat goes out
+    // the menu link (port 8000) also carries memory commands for mem_proxy
+    const bool mem_link = t->remote_play != NULL;
     while (program_running)
     {
         uint32_t ip_octet_incoming;
@@ -344,9 +435,12 @@ thread_ret_t tcp_thread_func(void *arg)
             retry_pending = false;
             packet_seq = 0;
             last_reply_us = iclock();
+            next_hb_us = iclock() + HEART_BEAT_EVERY_MS * 1000;
             resend_delay_ms = RP_RESEND_FIRST_MS;
             resend_at_us = 0;
             *(t->work_state) = CONNECTION_STATE_CONNECTED;
+            if (mem_link)
+                mem_proxy_link(true);
         }
         else if (*(t->work_state) == CONNECTION_STATE_CONNECTED)
         {
@@ -357,78 +451,62 @@ thread_ret_t tcp_thread_func(void *arg)
                 continue;
             }
 
-            Sleep(HEART_BEAT_EVERY_MS);
-
-            struct tcp_packet_hdr header = {0};
-            char *buf = (char *)&header;
-            int size = sizeof(header);
-            int ret;
-            if ((ret = tcp_recv(sockfd, buf, size)) < 0 || !program_running)
+            // Wait for the next heartbeat. Memory commands (mem_proxy) cut the
+            // wait short: new ones go out at once, and while replies are
+            // outstanding the socket is watched every few ms.
             {
-                if (program_running)
-                    err_log("tcp recv error: %d\n", socket_errno());
+                int32_t left_us = (int32_t)(next_hb_us - iclock());
+                if (left_us > 0) {
+                    int left_ms = (int)((left_us + 999) / 1000);
+                    if (mem_link && mem_proxy_has_work())
+                        socket_poll_ms(sockfd, MIN(left_ms, 2));
+                    else if (mem_link)
+                        mem_proxy_wait(left_ms);
+                    else
+                        Sleep(left_ms);
+                }
+            }
+
+            // everything the 3DS has sent so far (heartbeat replies, memory replies)
+            int ret = 0;
+            for (int n = 0; n < 64; ++n) {
+                ret = tcp_handle_packet(sockfd, mem_link, &last_reply_us);
+                if (ret <= 0)
+                    break;
+            }
+            if (ret < 0) {
                 RESET_SOCKET();
                 continue;
             }
-            if (ret)
-            {
-                if (header.magic != TCP_MAGIC)
-                {
-                    if (program_running)
-                        err_log("broken protocol\n");
+
+            if (mem_link) {
+                uint32_t mcmd, margs[TCP_ARGS_COUNT];
+                const uint8_t *mdata;
+                uint32_t mlen;
+                int token;
+                bool send_failed = false;
+                while ((token = mem_proxy_next(&mcmd, margs, &mdata, &mlen)) >= 0) {
+                    uint32_t seq = (uint32_t)packet_seq++;
+                    ret = tcp_send_packet_header(sockfd, seq, 0, mcmd, margs, TCP_ARGS_COUNT, mlen);
+                    if (ret >= 0 && mlen)
+                        ret = tcp_send(sockfd, (char *)mdata, (int)mlen);
+                    mem_proxy_sent(token, seq);
+                    if (ret < 0) {
+                        if (program_running)
+                            err_log("memory command send failed: %d\n", socket_errno());
+                        send_failed = true;
+                        break;
+                    }
+                }
+                if (send_failed) {
                     RESET_SOCKET();
                     continue;
                 }
-                last_reply_us = iclock();
-                if (header.cmd == 0)
-                {
-                    // err_log("heartbeat packet: size %d\n", header.data_len);
-                    if (header.data_len)
-                    {
-                        char *buf = malloc(header.data_len + 1);
-                        if (!buf)
-                        {
-                            err_log("heart beat recv alloc failed: %d\n", (int)header.data_len);
-                            RESET_SOCKET();
-                            continue;
-                        }
-                        if ((ret = tcp_recv(sockfd, buf, header.data_len)) < 0)
-                        {
-                            if (program_running)
-                                err_log("heart beat recv error: %d\n", socket_errno());
-                            free(buf);
-                            RESET_SOCKET();
-                            continue;
-                        }
-                        if (ret)
-                        {
-                            buf[header.data_len] = 0;
-                            fprintf(stderr, "%s", buf);
-                        }
-                        free(buf);
-                    }
-                }
-                else if (header.data_len)
-                {
-                    err_log("unhandled packet type %d: size %d\n", header.cmd, header.data_len);
-                    char *buf = malloc(header.data_len);
-                    if (!buf)
-                    {
-                        err_log("tcp recv alloc failed: %d\n", (int)header.data_len);
-                        RESET_SOCKET();
-                        continue;
-                    }
-                    if ((ret = tcp_recv(sockfd, buf, header.data_len)) < 0)
-                    {
-                        if (program_running)
-                            err_log("tcp recv error: %d\n", socket_errno());
-                        free(buf);
-                        RESET_SOCKET();
-                        continue;
-                    }
-                    free(buf);
-                }
             }
+
+            if ((int32_t)(iclock() - next_hb_us) < 0)
+                continue;
+            next_hb_us = iclock() + HEART_BEAT_EVERY_MS * 1000;
 
             // A 3DS that drops off Wi-Fi without closing the connection never
             // produces a recv error, so missing replies are the only sign.
